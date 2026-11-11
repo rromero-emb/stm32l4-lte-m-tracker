@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y clang-format cppcheck
+      - name: Formatting (clang-format)
+        run: make format-check
+      - name: Static analysis (cppcheck)
+        run: make lint
+
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcovr
+      - name: Unit tests (Unity, ASan + UBSan)
+        run: make test
+      - name: Coverage
+        run: |
+          gcovr --root . --filter drivers/src --object-directory build/host-tests --txt-summary --txt coverage.txt
+          { echo '### Host test coverage'; echo '```'; cat coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Arm GNU toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi cmake ninja-build
+      - name: Build (Release)
+        run: |
+          arm-none-eabi-gcc --version | head -1
+          make fw | tee build.log
+      - name: Size report
+        run: |
+          { echo '### Firmware size (STM32L476RG)'; echo '```'; grep -A3 'Memory region' build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-stm32l476rg
+          path: |
+            build/fw-release/tracker.elf
+            build/fw-release/tracker.bin
+            build/fw-release/tracker.hex
+            build/fw-release/tracker.map
+          if-no-files-found: error

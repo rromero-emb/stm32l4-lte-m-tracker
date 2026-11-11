@@ -1,0 +1,19 @@
+# arm-none-eabi-gdb -x tools/gdbinit build/fw-debug/tracker.elf   (with `openocd -f tools/openocd.cfg` running)
+target extended-remote :3333
+set print pretty on
+monitor reset halt
+
+# Decode the fault status registers after a fault: (gdb) fault
+define fault
+  printf "CFSR  = 0x%08x\n", *(unsigned int *)0xE000ED28
+  printf "HFSR  = 0x%08x\n", *(unsigned int *)0xE000ED2C
+  printf "MMFAR = 0x%08x\n", *(unsigned int *)0xE000ED34
+  printf "BFAR  = 0x%08x\n", *(unsigned int *)0xE000ED38
+  printf "stacked pc (MSP) = 0x%08x\n", ((unsigned int *)$msp)[6]
+  info symbol ((unsigned int *)$msp)[6]
+end
+
+# SPI2 registers: (gdb) spi2
+define spi2
+  printf "SPI2 CR1=0x%04x CR2=0x%04x SR=0x%04x\n", *(unsigned int *)0x40003800, *(unsigned int *)0x40003804, *(unsigned int *)0x40003808
+end

@@ -1,0 +1,27 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "fw-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake"
+    },
+    { "name": "fw-debug", "inherits": "fw-base", "binaryDir": "${sourceDir}/build/fw-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "fw-release", "inherits": "fw-base", "binaryDir": "${sourceDir}/build/fw-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    {
+      "name": "host-tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host-tests",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "fw-debug", "configurePreset": "fw-debug" },
+    { "name": "fw-release", "configurePreset": "fw-release" },
+    { "name": "host-tests", "configurePreset": "host-tests" }
+  ],
+  "testPresets": [
+    { "name": "host-tests", "configurePreset": "host-tests", "output": { "outputOnFailure": true } }
+  ]
+}
