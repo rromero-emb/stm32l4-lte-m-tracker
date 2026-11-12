@@ -62,7 +62,7 @@ void Reset_Handler(void)
     __ISB();
 
     // Linker-script symbols delimit the sections, so comparing their addresses is intended.
-    uint32_t *src = &_sidata;
+    const uint32_t *src = &_sidata;
     // cppcheck-suppress comparePointers
     for (uint32_t *dst = &_sdata; dst < &_edata;) {
         *dst++ = *src++;
