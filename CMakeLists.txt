@@ -26,12 +26,17 @@ if(CMAKE_CROSSCOMPILING)
         drivers/src/fmt.c
         drivers/src/fault.c
         drivers/src/fault_decode.c
+        modem/src/at.c
+        modem/src/bg95.c
+        app/src/payload.c
         app/main.c
     )
     set_target_properties(tracker PROPERTIES SUFFIX ".elf")
     target_compile_definitions(tracker PRIVATE STM32L476xx)
     target_include_directories(tracker PRIVATE
         drivers/include
+        modem/include
+        app/include
         third_party/cmsis/core
         third_party/cmsis/device
     )

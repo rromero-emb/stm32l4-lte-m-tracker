@@ -1,5 +1,5 @@
 # Convenience wrapper around the CMake presets.
-SRC := $(shell find app drivers startup tests/host -name '*.[ch]')
+SRC := $(shell find app drivers modem startup tests/host -name '*.[ch]')
 
 .PHONY: all fw fw-debug test format format-check lint flash clean
 
@@ -22,8 +22,8 @@ format-check:
 
 lint:
 	cppcheck --enable=warning,style,performance,portability --std=c11 --inline-suppr --error-exitcode=1 \
-		--suppress=missingIncludeSystem -DSTM32L476xx -D__GNUC__ -I drivers/include --library=gnu --quiet \
-		app drivers startup
+		--suppress=missingIncludeSystem -DSTM32L476xx -D__GNUC__ -I drivers/include -I modem/include -I app/include --library=gnu --quiet \
+		app drivers modem startup
 
 # Needs OpenOCD and a Nucleo board connected over ST-LINK.
 flash: fw

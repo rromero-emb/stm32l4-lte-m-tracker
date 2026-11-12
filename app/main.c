@@ -10,6 +10,7 @@
 #include "fault.h"
 #include "fmt.h"
 #include "gpio.h"
+#include "payload.h"
 #include "rcc.h"
 #include "spi.h"
 #include "stm32l4xx.h"
@@ -116,9 +117,26 @@ static void cmd_fault(void)
     (void)r;
 }
 
+static void cmd_payload(void)
+{
+    // Sample report (Madrid); decode the hex with: python3 tools/payload.py decode <hex>
+    tracker_report_t r = {MSG_PERIODIC, FIX_3D, true, 42U, 1762946400U, 404167754, -37037902, 657,
+                          48U,          271U,   6U,   9U,  14U,         3871U,     17,        -98};
+    uint8_t buf[PAYLOAD_LEN];
+    if (!payload_encode(&r, buf)) {
+        uart_puts("payload: encode failed\r\n");
+        return;
+    }
+    uart_puts("payload (20 B): ");
+    for (unsigned i = 0; i < PAYLOAD_LEN; i++) {
+        print("%02x", buf[i]);
+    }
+    uart_puts("\r\n");
+}
+
 static void cmd_help(void)
 {
-    uart_puts("commands: help | spi | mode <0-3> | regs | fault | stats\r\n");
+    uart_puts("commands: help | spi | mode <0-3> | regs | fault | stats | payload\r\n");
 }
 
 static void handle_line(char *line)
@@ -134,6 +152,8 @@ static void handle_line(char *line)
         cmd_regs();
     } else if (strcmp(line, "fault") == 0) {
         cmd_fault();
+    } else if (strcmp(line, "payload") == 0) {
+        cmd_payload();
     } else if (strcmp(line, "stats") == 0) {
         print("uptime %u ms, rx dropped %u, rx overruns %u\r\n", (unsigned)systick_ms(), (unsigned)uart_rx_dropped(),
               (unsigned)uart_rx_overruns());
