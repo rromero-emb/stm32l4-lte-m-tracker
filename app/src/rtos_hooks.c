@@ -42,6 +42,7 @@ __attribute__((noreturn)) void rtos_panic(const char *what, const char *file, in
     NVIC_SystemReset();
 }
 
+// cppcheck-suppress constParameterPointer ; the prototype is fixed by FreeRTOS (task.h)
 void vApplicationStackOverflowHook(TaskHandle_t task, char *name)
 {
     (void)task;
