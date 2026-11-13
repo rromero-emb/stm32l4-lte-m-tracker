@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "fmt.h"
+#include "psm.h"
 
 // ---------------------------------------------------------------- URCs
 
@@ -38,6 +39,13 @@ static void urc_qiopen(void *ctx, const char *line)
     }
 }
 
+static void urc_powered_down(void *ctx, const char *line)
+{
+    bg95_t *m = (bg95_t *)ctx;
+    (void)line;
+    m->powered_down = true;
+}
+
 static void urc_ignore(void *ctx, const char *line)
 {
     (void)ctx;
@@ -46,8 +54,14 @@ static void urc_ignore(void *ctx, const char *line)
 
 // BG95: "APP RDY" means the AT interface is fully usable; a bare "RDY" (older firmware) is not enough.
 static const at_urc_t urcs[] = {
-    {"APP RDY", urc_rdy},    {"RDY", urc_ignore},    {"+CEREG:", urc_cereg},       {"+QIOPEN:", urc_qiopen},
-    {"+QIURC:", urc_ignore}, {"+CPIN:", urc_ignore}, {"POWERED DOWN", urc_ignore}, {"+QIND:", urc_ignore},
+    {"APP RDY", urc_rdy},
+    {"RDY", urc_ignore},
+    {"+CEREG:", urc_cereg},
+    {"+QIOPEN:", urc_qiopen},
+    {"+QIURC:", urc_ignore},
+    {"+CPIN:", urc_ignore},
+    {"POWERED DOWN", urc_powered_down},
+    {"+QIND:", urc_ignore},
 };
 
 // ---------------------------------------------------------------- helpers
@@ -71,6 +85,9 @@ static void fail(bg95_t *m)
     m->failed_in = m->state;
     if (m->state == BG95_SENDING) {
         m->send_status = BG95_SEND_FAILED;
+    }
+    if (m->state == BG95_GNSS) {
+        m->gnss_status = BG95_GNSS_FAILED;
     }
     if (m->recoveries >= BG95_MAX_RECOVERIES) {
         enter(m, BG95_FAILED);
@@ -97,6 +114,7 @@ static step_t run(bg95_t *m, const char *cmd, const char *expect, uint32_t timeo
         return STEP_WAIT;
     }
     m->cmd_active = false;
+    m->last_result = r;
     return (r == AT_OK) ? STEP_DONE : STEP_FAILED;
 }
 
@@ -135,14 +153,30 @@ static const char *const init_script[] = {
     "AT+CFUN=1",                  // full functionality
 };
 
+#define INIT_SCRIPT_LEN (sizeof init_script / sizeof init_script[0])
+
 static void st_init(bg95_t *m)
 {
-    if (m->step >= (sizeof init_script / sizeof init_script[0])) {
+    size_t steps = INIT_SCRIPT_LEN + (m->cfg.psm ? 1U : 0U);
+    if (m->step >= steps) {
         m->reg_stat = 0;
         enter(m, BG95_REGISTER);
         return;
     }
-    step_t s = run(m, init_script[m->step], NULL, BG95_CMD_TIMEOUT_MS);
+    char psm_cmd[48];
+    const char *cmd = NULL;
+    if (m->step < INIT_SCRIPT_LEN) {
+        cmd = init_script[m->step];
+    } else {
+        // Request PSM: the network grants its own values, so this only states what we want.
+        char tau[9];
+        char act[9];
+        (void)psm_encode_t3412(m->cfg.psm_tau_s, tau);
+        (void)psm_encode_t3324(m->cfg.psm_active_s, act);
+        (void)fmt_snprintf(psm_cmd, sizeof psm_cmd, "AT+CPSMS=1,,,\"%s\",\"%s\"", tau, act);
+        cmd = psm_cmd;
+    }
+    step_t s = run(m, cmd, NULL, BG95_CMD_TIMEOUT_MS);
     if (s == STEP_DONE) {
         m->step++;
     } else if (s == STEP_FAILED) {
@@ -273,6 +307,104 @@ static void st_sending(bg95_t *m)
     }
 }
 
+// AT+QGPS=1 answers "+CME ERROR: 504" when a GNSS session is already running: not an error.
+#define CME_GNSS_SESSION_ONGOING 504
+
+static void st_gnss(bg95_t *m)
+{
+    step_t s = STEP_WAIT;
+    switch (m->step) {
+    case 0:  // GNSS gets the shared RF path (LTE stays registered but is not served meanwhile)
+        s = run(m, "AT+QGPSCFG=\"priority\",0", NULL, BG95_CMD_TIMEOUT_MS);
+        if (s == STEP_DONE) {
+            m->step = 1U;
+        } else if (s == STEP_FAILED) {
+            m->gnss_status = BG95_GNSS_FAILED;
+            m->step = 4U;
+        } else {
+            // in flight
+        }
+        break;
+    case 1:
+        s = run(m, "AT+QGPS=1", NULL, BG95_CMD_TIMEOUT_MS);
+        if ((s == STEP_DONE) ||
+            ((s == STEP_FAILED) && (m->last_result == AT_CME_ERROR) && (m->at.cme == CME_GNSS_SESSION_ONGOING))) {
+            m->gnss_started_ms = m->now_ms;
+            m->next_ms = m->now_ms;
+            m->step = 2U;
+            s = STEP_WAIT;
+        } else if (s == STEP_FAILED) {
+            m->gnss_status = BG95_GNSS_FAILED;
+            m->step = 4U;
+        } else {
+            // in flight
+        }
+        break;
+    case 2:  // poll for a fix; "+CME ERROR: 516" = not fixed yet
+        if (!m->cmd_active) {
+            if ((m->now_ms - m->gnss_started_ms) >= m->gnss_timeout_ms) {
+                m->gnss_status = BG95_GNSS_NO_FIX;
+                m->step = 3U;
+                break;
+            }
+            if ((int32_t)(m->now_ms - m->next_ms) < 0) {
+                break;
+            }
+        }
+        s = run(m, "AT+QGPSLOC=2", "+QGPSLOC:", BG95_CMD_TIMEOUT_MS);
+        if ((s == STEP_DONE) && (at_response(&m->at) != NULL) && gnss_parse_qgpsloc(at_response(&m->at), &m->fix)) {
+            uint32_t ttff = (m->now_ms - m->gnss_started_ms) / 1000U;
+            m->ttff_s = (uint16_t)((ttff > 0xFFFFU) ? 0xFFFFU : ttff);
+            m->gnss_status = BG95_GNSS_FIX;
+            m->step = 3U;
+        } else if ((s != STEP_WAIT) && (m->last_result != AT_TIMEOUT)) {
+            m->next_ms = m->now_ms + BG95_GNSS_POLL_MS;
+            s = STEP_WAIT;
+        } else {
+            // in flight, or an AT timeout handled below
+        }
+        break;
+    case 3:  // stop the GNSS engine (saves ~20 mA); its errors do not matter any more
+        s = run(m, "AT+QGPSEND", NULL, BG95_CMD_TIMEOUT_MS);
+        if (s != STEP_WAIT) {
+            m->step = 4U;
+            s = (m->last_result == AT_TIMEOUT) ? STEP_FAILED : STEP_WAIT;
+        }
+        break;
+    default:  // give the RF path back to LTE
+        s = run(m, "AT+QGPSCFG=\"priority\",1", NULL, BG95_CMD_TIMEOUT_MS);
+        if (s != STEP_WAIT) {
+            if (m->gnss_status == BG95_GNSS_BUSY) {
+                m->gnss_status = BG95_GNSS_FAILED;
+            }
+            if (m->last_result != AT_TIMEOUT) {
+                enter(m, BG95_READY);
+                return;
+            }
+        }
+        break;
+    }
+    // The module stopped answering: that is a modem problem, not a GNSS one.
+    if ((s == STEP_FAILED) && (m->last_result == AT_TIMEOUT)) {
+        fail(m);
+    }
+}
+
+static void st_power_off(bg95_t *m)
+{
+    if (m->step == 0U) {
+        step_t s = run(m, "AT+QPOWD=1", NULL, BG95_CMD_TIMEOUT_MS);
+        if (s != STEP_WAIT) {
+            m->step = 1U;
+            m->state_since_ms = m->now_ms;
+        }
+    } else if (m->powered_down || (in_state_ms(m) >= BG95_POWER_OFF_TIMEOUT_MS)) {
+        enter(m, BG95_OFF);
+    } else {
+        // waiting for "POWERED DOWN"
+    }
+}
+
 static void st_recovery(bg95_t *m)
 {
     if (m->recoveries <= 1U) {
@@ -340,6 +472,34 @@ bool bg95_send(bg95_t *m, const uint8_t *data, size_t len)
     return true;
 }
 
+bool bg95_gnss_start(bg95_t *m, uint32_t timeout_ms)
+{
+    if (m->state != BG95_READY) {
+        return false;
+    }
+    m->gnss_timeout_ms = timeout_ms;
+    m->gnss_status = BG95_GNSS_BUSY;
+    m->ttff_s = 0U;
+    enter(m, BG95_GNSS);
+    return true;
+}
+
+bool bg95_power_off(bg95_t *m)
+{
+    if ((m->state == BG95_OFF) || (m->state == BG95_POWER_OFF)) {
+        return false;
+    }
+    if (m->state == BG95_SENDING) {
+        m->send_status = BG95_SEND_FAILED;
+    }
+    if (m->state == BG95_GNSS) {
+        m->gnss_status = BG95_GNSS_FAILED;
+    }
+    m->powered_down = false;
+    enter(m, BG95_POWER_OFF);  // a command still in flight finishes first: run() waits for the engine
+    return true;
+}
+
 void bg95_poll(bg95_t *m, uint32_t now_ms)
 {
     m->now_ms = now_ms;
@@ -350,6 +510,9 @@ void bg95_poll(bg95_t *m, uint32_t now_ms)
         m->rebooted = false;
         if (m->state == BG95_SENDING) {
             m->send_status = BG95_SEND_FAILED;
+        }
+        if (m->state == BG95_GNSS) {
+            m->gnss_status = BG95_GNSS_FAILED;
         }
         m->cmd_active = false;
         enter(m, BG95_INIT);
@@ -372,8 +535,14 @@ void bg95_poll(bg95_t *m, uint32_t now_ms)
     case BG95_ATTACH:
         st_attach(m);
         break;
+    case BG95_GNSS:
+        st_gnss(m);
+        break;
     case BG95_SENDING:
         st_sending(m);
+        break;
+    case BG95_POWER_OFF:
+        st_power_off(m);
         break;
     case BG95_RECOVERY:
         st_recovery(m);
@@ -388,7 +557,7 @@ void bg95_poll(bg95_t *m, uint32_t now_ms)
 
 const char *bg95_state_name(bg95_state_t s)
 {
-    static const char *const names[] = {"OFF",    "POWER_ON", "WAIT_RDY", "INIT",     "REGISTER",
-                                        "ATTACH", "READY",    "SENDING",  "RECOVERY", "FAILED"};
+    static const char *const names[] = {"OFF",   "POWER_ON", "WAIT_RDY", "INIT",     "REGISTER", "ATTACH",
+                                        "READY", "GNSS",     "SENDING",  "RECOVERY", "FAILED",   "POWER_OFF"};
     return ((unsigned)s < (sizeof names / sizeof names[0])) ? names[s] : "?";
 }

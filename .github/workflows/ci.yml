@@ -30,7 +30,7 @@ jobs:
         run: make test
       - name: Coverage
         run: |
-          gcovr --root . --filter drivers/src --object-directory build/host-tests --txt-summary --txt coverage.txt
+          gcovr --root . --filter drivers/src --filter modem/src --filter power/src --filter app/src --object-directory build/host-tests --txt-summary --txt coverage.txt
           { echo '### Host test coverage'; echo '```'; cat coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   firmware:

@@ -9,7 +9,12 @@ add_library(fw_host STATIC
     ${CMAKE_SOURCE_DIR}/drivers/src/fault_decode.c
     ${CMAKE_SOURCE_DIR}/modem/src/at.c
     ${CMAKE_SOURCE_DIR}/modem/src/bg95.c
+    ${CMAKE_SOURCE_DIR}/drivers/src/lis2dh12.c
+    ${CMAKE_SOURCE_DIR}/modem/src/gnss.c
+    ${CMAKE_SOURCE_DIR}/modem/src/psm.c
+    ${CMAKE_SOURCE_DIR}/power/src/lowpower_calc.c
     ${CMAKE_SOURCE_DIR}/app/src/payload.c
+    ${CMAKE_SOURCE_DIR}/app/src/policy.c
 )
 target_compile_definitions(fw_host PUBLIC STM32L476xx SPI_TIMEOUT_LOOPS=1000U)
 target_include_directories(fw_host PUBLIC
@@ -17,12 +22,14 @@ target_include_directories(fw_host PUBLIC
     ${CMAKE_SOURCE_DIR}/drivers/include
     ${CMAKE_SOURCE_DIR}/modem/include
     ${CMAKE_SOURCE_DIR}/app/include
+    ${CMAKE_SOURCE_DIR}/power/include
     ${CMAKE_SOURCE_DIR}/third_party/cmsis/device
 )
 target_compile_options(fw_host PRIVATE ${WARNINGS} -Werror --coverage -fsanitize=address,undefined)
 target_link_options(fw_host PUBLIC --coverage -fsanitize=address,undefined)
 
-set(HOST_TESTS test_spi test_ringbuf test_fmt test_fault_decode test_uart_brr test_at test_bg95 test_payload)
+set(HOST_TESTS test_spi test_ringbuf test_fmt test_fault_decode test_uart_brr test_at test_bg95 test_payload
+    test_lowpower_calc test_lis2dh12 test_gnss_psm test_policy)
 foreach(t ${HOST_TESTS})
     add_executable(${t} ${t}.c)
     target_link_libraries(${t} PRIVATE fw_host unity)
@@ -37,3 +44,7 @@ target_link_libraries(payload_cli PRIVATE fw_host)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME payload_vectors
     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test_payload_vectors.py $<TARGET_FILE:payload_cli> ${CMAKE_SOURCE_DIR})
+
+# Power model arithmetic, and the tables in docs/POWER.md regenerated from tools/power_params.json
+add_test(NAME power_budget
+    COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/test_power_budget.py ${CMAKE_SOURCE_DIR})

@@ -20,10 +20,15 @@ void SVC_Handler(void) WEAK_ALIAS;
 void DebugMon_Handler(void) WEAK_ALIAS;
 void PendSV_Handler(void) WEAK_ALIAS;
 void SysTick_Handler(void) WEAK_ALIAS;
+void EXTI0_IRQHandler(void) WEAK_ALIAS;
+void EXTI3_IRQHandler(void) WEAK_ALIAS;
+void DMA1_Channel5_IRQHandler(void) WEAK_ALIAS;
 void DMA1_Channel6_IRQHandler(void) WEAK_ALIAS;
 void DMA1_Channel7_IRQHandler(void) WEAK_ALIAS;
 void SPI2_IRQHandler(void) WEAK_ALIAS;
+void USART1_IRQHandler(void) WEAK_ALIAS;
 void USART2_IRQHandler(void) WEAK_ALIAS;
+void LPTIM1_IRQHandler(void) WEAK_ALIAS;
 
 #define IRQ(n) (16 + (n))
 #define NUM_IRQS 82  // up to FPU_IRQn = 81 on the STM32L476
@@ -47,10 +52,15 @@ __attribute__((section(".isr_vector"), used)) const vector_t vector_table[16 + N
     [14] = PendSV_Handler,
     [15] = SysTick_Handler,
     [16 ... 16 + NUM_IRQS - 1] = Default_Handler,
+    [IRQ(EXTI0_IRQn)] = EXTI0_IRQHandler,
+    [IRQ(EXTI3_IRQn)] = EXTI3_IRQHandler,
+    [IRQ(DMA1_Channel5_IRQn)] = DMA1_Channel5_IRQHandler,
     [IRQ(DMA1_Channel6_IRQn)] = DMA1_Channel6_IRQHandler,
     [IRQ(DMA1_Channel7_IRQn)] = DMA1_Channel7_IRQHandler,
     [IRQ(SPI2_IRQn)] = SPI2_IRQHandler,
+    [IRQ(USART1_IRQn)] = USART1_IRQHandler,
     [IRQ(USART2_IRQn)] = USART2_IRQHandler,
+    [IRQ(LPTIM1_IRQn)] = LPTIM1_IRQHandler,
 };
 #pragma GCC diagnostic pop
 

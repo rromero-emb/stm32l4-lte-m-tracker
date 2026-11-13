@@ -1,0 +1,30 @@
+{
+  "_note": "Every value has a source or is marked as an assumption. Session 5 replaces the assumptions with measurements (PPK2).",
+  "supply_v": 3.6,
+  "battery": {"name": "Li-SOCl2 AA-size (ER14505 class)", "capacity_mah": 2600, "usable_fraction": 0.8,
+              "source": "nominal capacity class; usable fraction is an assumption (temperature, pulse load, self-discharge)"},
+  "sleep_ua": {
+    "mcu_stop2_lse": {"ua": 1.4, "source": "STM32L476 datasheet, feature summary: Stop 2 ~1.1 uA, ~1.4 uA with RTC/LSE"},
+    "accelerometer": {"ua": 5.0, "source": "LIS2DH12 low-power 10 Hz: 3 uA typ at 1.8 V (AN5005); ST expects ~5 uA at 3.6 V"},
+    "regulator_and_leakage": {"ua": 1.5, "source": "assumption: nano-power LDO + pull-ups + board leakage"}
+  },
+  "modem_sleep_ua": {
+    "off": {"ua": 0.0, "source": "assumption: BG95 supply behind a load switch while off"},
+    "psm": {"ua": 3.9, "source": "Quectel BG95/BG77/BG600L LPWA Module Introduction V2.9: Cat M 3.9 uA typ in PSM"}
+  },
+  "phases": {
+    "_source": "ASSUMPTIONS for LTE-M in good coverage; to be measured in session 5",
+    "boot":       {"s": 3.0,  "ma": 20.0},
+    "register":   {"s": 10.0, "ma": 60.0},
+    "gnss_fix":   {"s": 30.0, "ma": 30.0},
+    "psm_wake":   {"s": 2.0,  "ma": 60.0},
+    "send":       {"s": 3.0,  "ma": 100.0},
+    "power_down": {"s": 2.0,  "ma": 15.0},
+    "mcu_awake":  {"ma": 6.0, "source": "assumption: STM32L476 at 80 MHz ~ 100 uA/MHz, mostly in Sleep while waiting for the modem"}
+  },
+  "strategies": {
+    "off":  {"label": "power off between reports", "phases": ["boot", "register", "gnss_fix", "send", "power_down"]},
+    "psm":  {"label": "PSM between reports",       "phases": ["psm_wake", "gnss_fix", "send"]}
+  },
+  "intervals_min": [5, 15, 60, 360, 1440]
+}

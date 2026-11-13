@@ -69,3 +69,48 @@ int rcc_clock_init_80mhz(void)
     SystemCoreClock = RCC_SYSCLK_HZ;
     return 0;
 }
+
+// The LSE can take a second or two to start; LSERDY is polled with a long loop.
+#define LSE_TIMEOUT 40000000U
+
+rcc_lsclk_t rcc_lsclk_init(void)
+{
+    RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN;
+    (void)RCC->APB1ENR1;
+    PWR->CR1 |= PWR_CR1_DBP;  // the LSE lives in the backup domain, write-protected after reset
+    if ((RCC->BDCR & RCC_BDCR_LSERDY) != 0U) {
+        return RCC_LSCLK_LSE;  // still running from before a system reset
+    }
+    RCC->BDCR = (RCC->BDCR & ~RCC_BDCR_LSEDRV) | RCC_BDCR_LSEON;  // lowest drive: lowest current
+    if (wait_set(&RCC->BDCR, RCC_BDCR_LSERDY) == 0) {
+        return RCC_LSCLK_LSE;
+    }
+    for (uint32_t i = 0; i < LSE_TIMEOUT; i++) {
+        if ((RCC->BDCR & RCC_BDCR_LSERDY) != 0U) {
+            return RCC_LSCLK_LSE;
+        }
+    }
+    RCC->BDCR &= ~RCC_BDCR_LSEON;
+    RCC->CSR |= RCC_CSR_LSION;
+    return (wait_set(&RCC->CSR, RCC_CSR_LSIRDY) == 0) ? RCC_LSCLK_LSI : RCC_LSCLK_NONE;
+}
+
+int rcc_restore_after_stop(void)
+{
+    if ((RCC->CFGR & RCC_CFGR_SWS) == RCC_CFGR_SWS_PLL) {
+        return 0;
+    }
+    RCC->CR |= RCC_CR_PLLON;
+    if (wait_set(&RCC->CR, RCC_CR_PLLRDY) != 0) {
+        SystemCoreClock = 4000000U;
+        return -1;
+    }
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW) | RCC_CFGR_SW_PLL;
+    for (uint32_t i = 0; (RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL; i++) {
+        if (i > READY_TIMEOUT) {
+            return -1;
+        }
+    }
+    SystemCoreClock = RCC_SYSCLK_HZ;
+    return 0;
+}
